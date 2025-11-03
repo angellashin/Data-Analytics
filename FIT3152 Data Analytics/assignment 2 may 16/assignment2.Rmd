@@ -1,0 +1,169 @@
+---
+title: "assignment 2"
+author: "SHIN MINSEO"
+date: "2025-05-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ipred)
+library(xgboost)
+library(tree)
+library(e1071)      
+library(adabag)  
+library(randomForest)
+library(caret)
+library(rgl)
+library(ggplot2)
+library(ROCR)
+library(rpart)
+library(neuralnet)
+
+```
+
+```{r}
+#Data Setup
+rm(list = ls())
+set.seed(35865377)
+WD = read.csv("WinnData.csv")
+WD = WD[sample(nrow(WD),5000,replace=FALSE),]
+WD = WD[,c(sort(sample(1:30,20,replace=FALSE)), 31)]
+```
+
+#Question 1. Data Overview
+```{r}
+#question 1
+count_Oats <- sum(WD$Class == 1)
+count_Other <- sum(WD$Class == 0)
+prop_Oats <- count_Oats / nrow(WD)
+prop_Other <- count_Other / nrow(WD)
+
+cat("Total observations:", nrow(WD), "\n")
+cat("Oats(1): ", count_Oats, "(", round(prop_Oats * 100, 2), "% )\n")
+cat("Other (0): ", count_Other, "(", round(prop_Other * 100, 2), "% )\n")
+
+```
+
+```{r}
+barplot(c(prop_Other, prop_Oats),
+        names.arg = c("Other(0)", "Oats(1)"),
+        col = c("skyblue","red"),
+        ylim = c(0,1),
+        main = "Proportion of Oats vs Other Crops",
+        ylab = "Proportion")
+```
+
+
+```{r}
+summary(WD[, -which(names(WD) == "Class")])
+sapply(WD[, -which(names(WD) == "Class")], sd)
+
+```
+
+
+
+The dataset used in this project contains 5,000 observations and 21 variables, including 1 target variable ("class"). The task is to classify whether a given land area is growing Oats (class = 1) or other crops (class = 0). 
+
+It's shown that out of 5,000 land parcels, 13.76$ grow oats, 86.24% grow other crops. 
+The summary statistics demonstrates mean, median, standard deviation for the 20 selected predictors. Some features such as A11, A12, and A30 have very low standard deviations, suggesting low variability, whereas attributes like A26 and A05 show significant variation. 
+
+No attribute was found to have all-zero values or constant entries, but variables with extremely low variance should be reviewed before final model fitting. 
+
+A full summary statistics are provided in the appendix. 
+
+
+#Question 2. Preprocessing
+```{r}
+#question 2
+WD_filtered <- WD[complete.cases(WD),] #remove rows missing values
+
+WD_filtered$Class <- as.factor(WD_filtered$Class)
+dim(WD_filtered)
+
+```
+
+I used complete.cases() to remove any rows with missing values. 
+No rows contained missing values as the shape remains. 
+
+```{r}
+library(caret)
+nzv_check <- nearZeroVar(WD_filtered, saveMetrics = TRUE)
+nzv_check
+```
+
+Since we will split data and apply models like decision tree, random forest, I used nearZeroVar() to detect features with little variation. 
+
+#Question 3. Splitting Data
+I divided my data into 70% training and 30% test set by adapting the following code. 
+
+```{r}
+#question 3
+set.seed(35865377)
+train.row = sample(1:nrow(WD_filtered), 0.7*nrow(WD_filtered))
+WD.train = WD_filtered[train.row,]
+WD.test = WD_filtered[-train.row,]
+```
+
+#Question 4. Classification Models
+```{r}
+#question 4
+#Decision Tree
+set.seed(35865377)
+WD.tree <- tree(Class ~ ., data = WD.train)
+
+#Naive Bayes
+set.seed(35865377)
+WD.nb <- naiveBayes(Class ~., data = WD.train)
+
+#Bagging
+set.seed(35865377)
+WD.bag <- bagging(Class ~., data = WD.train, mfinal = 10)
+
+#Boosting
+set.seed(35865377)
+WD.boost <- boosting(Class ~., data = WD.train, mfinal = 10)
+
+#random forest
+set.seed(35865377)
+WD.rf <- randomForest(Class ~., data = WD.train)
+```
+
+#Question 5. Confusion Matrix
+
+```{r}
+#question 5
+
+#Decision Tree Confusion Matrix
+WD.tree.predict <- predict(WD.tree, WD.test, type = "class")
+WD.tree.cm <- confusionMatrix(data = WD.tree.predict, reference = WD.test$Class)
+WD.tree.cm
+
+```
+
+Decision Tree: Accuracy of 85.53%, but failed to predict any Oats cases (class 1). So the precision, recall, and F1 score for Oats were all 0. This shows the data is imbalanced because decisionn trees tend to ignore minority class. 
+
+```{r}
+#Naive Bayes Confusion Matrix
+WD.nb.predict <- predict(WD.nb, WD.test)
+WD.nb.cm <- confusionMatrix(data = WD.nb.predict, reference = WD.test$Class)
+WD.nb.cm
+
+```
+
+
+Naive Bayes: Achieved an overall accuracy of 82.4%, slightly better performance on detecting Oats compared to the decision tree. Precision of 0.21, recall of 0.08, and F1-score of 0.12 is achieved. 
+
+```{r}
+#Bagging Confusion Matrix
+
+WD.bag.predict <- factor(predict(WD.bag, newdata = WD.test), levels = levels(WD.test$Class))
+WD.bag.predict <- factor(WD.bag.predict, levels = levels(WD.test$Class))
+WD.bag.cm <- confusionMatrix(data = WD.bag.predict, reference = WD.test$Class)
+WD.bag.cm
+
+```
+
+
+
+
+

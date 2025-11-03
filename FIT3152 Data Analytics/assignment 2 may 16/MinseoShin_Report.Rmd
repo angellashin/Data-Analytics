@@ -1,0 +1,519 @@
+---
+title: "Minseo Shin 35865377"
+author: "SHIN MINSEO"
+date: "2025-05-17"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(caret)
+library(e1071)  
+library(rpart)
+library(tree)
+
+library(randomForest)
+library(adabag)  
+library(ipred)
+library(xgboost)
+
+library(neuralnet)
+
+library(ggplot2)
+library(ROCR)
+
+```
+
+```{r}
+#Data Setup
+rm(list = ls())
+set.seed(35865377)
+WD = read.csv("WinnData.csv")
+WD = WD[sample(nrow(WD),5000,replace=FALSE),]
+WD = WD[,c(sort(sample(1:30,20,replace=FALSE)), 31)]
+```
+
+#Question 1. Data Overview
+```{r}
+#question 1
+count_Oats <- sum(WD$Class == 1)
+count_Other <- sum(WD$Class == 0)
+prop_Oats <- count_Oats / nrow(WD)
+prop_Other <- count_Other / nrow(WD)
+
+cat("Total observations:", nrow(WD), "\n")
+cat("Oats(1): ", count_Oats, "(", round(prop_Oats * 100, 2), "% )\n")
+cat("Other (0): ", count_Other, "(", round(prop_Other * 100, 2), "% )\n")
+
+```
+
+
+```{r}
+barplot(c(prop_Other, prop_Oats),
+        names.arg = c("Other(0)", "Oats(1)"),
+        col = c("skyblue","red"),
+        ylim = c(0,1),
+        main = "Proportion of Oats vs Other Crops",
+        ylab = "Proportion")
+```
+
+
+```{r}
+summary(WD[, -which(names(WD) == "Class")])
+sapply(WD[, -which(names(WD) == "Class")], sd)
+
+```
+
+The dataset used in this project contains 5,000 observations and 21 variables, including 1 target variable ("class"). The task is to classify whether a given land area is growing Oats (class = 1) or other crops (class = 0). 
+
+It's shown that out of 5,000 land parcels, 13.76$ grow oats, 86.24% grow other crops. 
+The summary statistics demonstrates mean, median, standard deviation for the 20 selected predictors. Some features such as A11, A12, and A30 have very low standard deviations, suggesting low variability, whereas attributes like A26 and A05 show significant variation. 
+
+No attribute was found to have all-zero values or constant entries, but variables with extremely low variance should be reviewed before final model fitting. 
+
+A full summary statistics are provided in the appendix. 
+
+
+#Question 2. Preprocessing
+```{r}
+#question 2
+WD_filtered <- WD[complete.cases(WD),] #remove rows missing values
+
+WD_filtered$Class <- as.factor(WD_filtered$Class)
+dim(WD_filtered)
+
+```
+
+I used complete.cases() to remove any rows with missing values. 
+No rows contained missing values as the shape remains. 
+
+```{r}
+library(caret)
+nzv_check <- nearZeroVar(WD_filtered, saveMetrics = TRUE)
+nzv_check
+```
+Since we will split data and apply models like decision tree, random forest, I used nearZeroVar() to detect features with little variation. 
+
+#Question 3. Splitting Data
+I divided my data into 70% training and 30% test set by adapting the following code. 
+
+```{r}
+#question 3
+set.seed(35865377)
+train.row = sample(1:nrow(WD_filtered), 0.7*nrow(WD_filtered))
+WD.train = WD_filtered[train.row,]
+WD.test = WD_filtered[-train.row,]
+```
+
+#Question 4. Classification Models
+```{r}
+#question 4
+#Decision Tree
+set.seed(35865377)
+WD.tree <- tree(Class ~ ., data = WD.train)
+
+#Naive Bayes
+set.seed(35865377)
+WD.nb <- naiveBayes(Class ~., data = WD.train)
+
+#Bagging
+set.seed(35865377)
+WD.bag <- bagging(Class ~., data = WD.train, mfinal = 10)
+
+#Boosting
+set.seed(35865377)
+WD.boost <- boosting(Class ~., data = WD.train, mfinal = 10)
+
+#random forest
+set.seed(35865377)
+WD.rf <- randomForest(Class ~., data = WD.train)
+```
+
+#Question 5. Confusion Matrix
+
+```{r}
+#question 5
+
+#Decision Tree Confusion Matrix
+WD.tree.predict <- predict(WD.tree, WD.test, type = "class")
+WD.tree.cm <- confusionMatrix(data = WD.tree.predict, reference = WD.test$Class)
+WD.tree.cm
+
+```
+Decision Tree: Accuracy of 85.53%, but failed to predict any Oats cases (class 1). So the precision, recall, and F1 score for Oats were all 0. This shows the data is imbalanced because decisionn trees tend to ignore minority class. 
+
+```{r}
+#Naive Bayes Confusion Matrix
+WD.nb.predict <- predict(WD.nb, WD.test)
+WD.nb.cm <- confusionMatrix(data = WD.nb.predict, reference = WD.test$Class)
+WD.nb.cm
+
+```
+
+Naive Bayes: Achieved an overall accuracy of 82.4%, slightly better performance on detecting Oats compared to the decision tree. Precision of 0.21, recall of 0.08, and F1-score of 0.12 is achieved. 
+
+```{r}
+#Bagging Confusion Matrix
+WD.bag.predict <- predict(WD.bag, newdata = WD.test)
+WD.bag.predict <- factor(WD.bag.predict, levels = levels(WD.test$Class))
+WD.bag.cm <- confusionMatrix(data = WD.bag.predict, reference = WD.test$Class)
+WD.bag.cm
+
+```
+Bagging Confusion Matrix: Achieved an accuracy of 85.73%. The model shows high sensitivity (0.9852), meaning it was successful in identifying class 0. However,it has a low specificity (0.0737)
+
+With precision of 0.8649, negative predictive value of 0.543, and F-1 score about 0.29, this model still fails to address the imbalance problem occurred in simpler models. 
+
+
+```{r}
+#Boosting Confusion Matrix
+WD.boost.predict <- predict(WD.boost, newdata = WD.test)$class
+WD.boost.predict <- factor(WD.boost.predict, levels = levels(WD.test$Class))
+WD.boost.cm <- confusionMatrix(data = WD.boost.predict, reference = WD.test$Class)
+WD.boost.cm
+```
+Boosting Confusion Matrix: Achieved an accuracy of 85.73%. It correctly identified 34 out of 217 Oats cases, with precision of 0.523, recall of 0.157 and F-1 score of approximately 0.242. 
+
+
+```{r}
+#Random Forest Confusion Matrix
+WD.rf.predict <- predict(WD.rf, WD.test)
+WD.rf.cm <- confusionMatrix(data = WD.rf.predict, reference = WD.test$Class)
+WD.rf.cm
+
+```
+Random forest Confusion matrix: Achieved an accuracy of 85.67%. It shows a moderate precision (0.625) but low recall (0.023) for detecting Oats. F-1 score is approximately 0.045. 
+
+Across all five classification models, boosting demonstrated the best performance for detecting Oats, with highest F1 score and recall. Despite all five models have similar accuracy, some failed to detect Oats. Random Forest achieved highest precision for Oats but like others, had low recall. 
+
+#Question 6. ROC and AUC
+
+```{r}
+#question 6
+
+#Decision Tree
+
+WD.tree.prob <- predict(WD.tree,WD.test,type="vector")
+str(WD.tree.prob)
+WD.tree.prob <- WD.tree.prob[,"1"]
+WD.tree.pred <- prediction(WD.tree.prob, as.numeric(WD.test$Class)-1)
+WD.tree.perf <- performance(WD.tree.pred,"tpr","fpr")
+WD.tree.auc <- performance(WD.tree.pred, "auc")@y.values[[1]]
+cat("Decision Tree AUC:", WD.tree.auc,"\n")
+```
+
+
+```{r}
+actual.labels <- as.numeric(as.character(WD.test$Class))
+#Naive Bayes
+
+WD.nb.prob <- predict(WD.nb, WD.test, type = "raw")[, "1"]
+WD.nb.pred <- prediction(WD.nb.prob, actual.labels)
+WD.nb.perf <- performance(WD.nb.pred, "tpr", "fpr")
+WD.nb.auc <- performance(WD.nb.pred, "auc")@y.values[[1]]
+cat("Naive Bayes AUC:", WD.nb.auc, "\n")
+
+```
+
+
+```{r}
+#Bagging
+str(predict(WD.bag, newdata = WD.test))
+WD.bag.fullpred <- predict(WD.bag, newdata = WD.test, type = "prob")
+str(WD.bag.fullpred)  
+WD.bag.prob <- WD.bag.fullpred[, "1"]
+actual.labels <- as.numeric(as.character(WD.test$Class))
+WD.bag.roc <- prediction(WD.bag.prob, actual.labels)
+WD.bag.perf <- performance(WD.bag.roc, "tpr", "fpr")
+WD.bag.auc <- performance(WD.bag.roc, "auc")@y.values[[1]]
+cat("Bagging AUC:", WD.bag.auc, "\n")
+
+```
+
+
+```{r}
+#Boosting
+WD.boost.prob <- predict(WD.boost, newdata=WD.test)
+WD.boost.roc <- prediction(WD.boost.prob$prob[, 2], WD.test$Class)
+WD.boost.perf <- performance(WD.boost.roc, "tpr", "fpr")
+WD.boost.auc <- performance(WD.boost.roc, "auc")@y.values[[1]]
+cat("Boosting AUC:", WD.boost.auc, "\n")
+
+```
+
+
+```{r}
+#Random Forest 
+WD.rf.prob <- predict(WD.rf, WD.test, type = "prob")[, 2]
+WD.rf.roc <- prediction(WD.rf.prob, WD.test$Class)
+WD.rf.perf <- performance(WD.rf.roc, "tpr", "fpr")
+WD.rf.auc <- performance(WD.rf.roc, "auc")@y.values[[1]]
+cat("Random Forest AUC:", WD.rf.auc, "\n")
+
+```
+
+
+```{r}
+#Plot
+plot(WD.tree.perf, col = "red", main = "ROC Curves for All Classifiers")
+plot(WD.nb.perf, add = TRUE, col = "blue")
+plot(WD.bag.perf, add = TRUE, col = "green")
+plot(WD.boost.perf, add = TRUE, col = "purple")
+plot(WD.rf.perf, add = TRUE, col = "orange")
+abline(a = 0, b = 1, lty = 2)
+
+legend("bottomright",
+       legend = c("Decision Tree", "Naive Bayes", "Bagging", "Boosting", "Random Forest"),
+       col = c("red", "blue", "green", "purple", "orange"),
+       lwd = 2)
+
+```
+
+To evaluate the confidence of each classifier in predicting class 1, I used ROC curves and plotted using the test data, and the Area Under the Curve (AUC) was calculated for each model. As seen in the ROC curve plot, it illustrates the trade-off between the true positive rate (sensitivity) and false positive rate at various levels. 
+
+The AUC levels are resulted as follows: 
+Decision Tree: 0.6740
+Naive Bayes: 0.6512
+Bagging: 0.7062
+Boosting: 0.7140
+Random Forest: 0.7509
+
+Random Forest model has the highest AUS, indicating the best overall ability in distinguishing between classes across the various thresholds. Boosting also performed well (0.714). Hence, ensemble methods of these two models are effective in this classification task. 
+
+```{r}
+WD.tree.cm$byClass["Sensitivity"]
+WD.nb.cm$byClass["Sensitivity"]
+WD.bag.cm$byClass["Sensitivity"]
+WD.boost.cm$byClass["Sensitivity"]
+WD.rf.cm$byClass["Sensitivity"]
+```
+
+#Question 7. Comparison
+```{r}
+# Classifier names
+classifiers_name <- c("Decision Tree", "Naive Bayes", "Bagging", "Boosting", "Random Forest")
+
+accuracy_of_classifiers <- c(0.8553, 0.824, 0.8533, 0.8573, 0.8567)
+
+confidence_of_classifiers <- c(1.0000, 0.9501, 0.9852, 0.9758, 0.9977)
+
+auc_values <- c(0.6740, 0.6512, 0.7062, 0.7140, 0.7509)
+
+accuracy_of_classifiers_rounded <- round(accuracy_of_classifiers, 4)
+confidence_of_classifiers_rounded <- round(confidence_of_classifiers, 4)
+auc_values_rounded <- round(auc_values, 4)
+
+classifier_table <- data.frame(
+  Classifier = classifiers_name,
+  Accuracy = accuracy_of_classifiers_rounded,
+  Confidence = confidence_of_classifiers_rounded,
+  AUC = auc_values_rounded
+)
+
+print(classifier_table)
+
+```
+The table compares the performance of 5 classification models in terms of accuracy, confidence, and AUC. 
+Decision Tree achieved highest sensitivity, its AUC was the lowest, indicating a poor ability to identify the two classes. Naive Bayes also had moderately low accuracy and AUC. 
+The three ensemble methods (Boosting, Bagging, Random Forest) performed better than the previous two models. 
+Random forest is the most consistent performer, showing highest AUC value and a strong overall accuracy.
+Boosting has a slightly lower AUC compared to random forest, and had the best confidence, showing it is strong in detecting Oats class. 
+Bagging has lowest accuracy among the three ensemble methods, but its AUC value is highest than that of boosting. 
+Therefore, Random Forest can be chosen as best "balanced" classifier as it has both high predictive power and ability to handle class imbalance. 
+
+
+#Question 8. Attributes to omit
+```{r}
+#question 8
+
+#Decision Tree
+summary(WD.tree)
+```
+Variables actually used in tree construction: A26, A02, A09
+17 out of 20 predictors were not used by decision tree (except A26, A02, A09), so they can be ommitted. 
+
+```{r}
+#Naive Bayes
+
+nb.model <- train(Class ~., data = WD.train, method = "nb")
+varImp(nb.model)
+```
+Because Naive Bayes don't have built-in importance function, I used varImp() function. 
+The variables A26, A02, A24, A18, A29 have highest importance scores. 
+Features like A15, A04, A08 can be removed as it has lowest overall score. 
+
+```{r}
+#Bagging
+
+#WD.bag$importance
+```
+Variables with lowest importance are A04, A19, A08, all scoring below 2. These had almost zero contribution so we can decide to drop as it will have minimal impact. 
+
+```{r}
+#Boosting
+WD.boost$importance
+```
+A19 has 0 importance and A15, A16, A08, A20, A12 all scored below 2.5 of importance, so these variables have limited effect on performance. 
+
+```{r}
+#Random Forest
+importance(WD.rf)
+```
+A19, A16, A20, A11 had the lowest MeanDecreaseGini values so can be omitted in model simplification. 
+
+Overall, we can see a consistent pattern of importance for the variables. A26 is ranked as one of highest contributors in common, indicating a strong predictive relationship with crop type. On the other hand, variables A08, A19, A15, A20 appears to be low in importance overall. A19 is near 0 in in boosting and Random Forest. Eliminating these can improve the model efficiency without harming accuracy. We can 
+
+#Question 9. Differences 
+According to the test results, models like Boosting and Random Forest produced better performance. This is because they are both powerful ensemble methods that bring multiple decision trees, reducing overfitting. 
+A simple decision tree itself has a limitation in that it may overfit or underfit. In this case, it only used three variables to classify, resulting in predicting only the majority class and a poor yield for Oats. 
+Naive Bayes worked better than decision tree for detecting Oats but still failed to classify Oats class because of overlapping class distributions. 
+Bagging as well did not well detect minority class because each tree strugged with class imbalance.  
+Boosting, on the other hand, uses a method in which a new tree corrects the mistakes of past trees, by optimizing a loss function. It is also able to handle imbalanced datasets by focusing on more difficult-to-classify instances.  
+Random forest operates through bagging, with random feature selection. This increases robustness and reduces overfitting, thus shows a high AUC. 
+
+
+#Question 10. Simple Classifier
+```{r}
+#question 10 
+
+WD.simple.train <- WD.train[, c("A26","A02","A05","Class")]
+WD.simple.test <- WD.test[, c("A26","A02","A05","Class")]
+
+set.seed(35865377)
+WD.simple.tree <- tree(Class ~., data = WD.simple.train)
+
+plot(WD.simple.tree)
+text(WD.simple.tree, pretty = 0)
+title(main = "Simple Decision Tree")
+
+```
+
+I created a simple decision tree for question 4 using 3 most important attributes across all models: A26, A02, A05. These features ranked highest importance in most models. From the tree diagram, we can interpret that if A26 is greater than 15.76 and A02 is smaller than -12.66, then predict as Oats. 
+
+```{r}
+WD.simple.pred.class <- predict(WD.simple.tree, WD.simple.test, type = "class")
+
+WD.simple.cm <- confusionMatrix(WD.simple.pred.class, WD.simple.test$Class)
+WD.simple.cm
+```
+
+```{r}
+accuracy <- WD.simple.cm$overall["Accuracy"]
+sensitivity <- WD.simple.cm$byClass["Sensitivity"]
+precision <- WD.simple.cm$byClass["Precision"]
+f1 <- WD.simple.cm$byClass["F1"]
+cat("Accuracy:", accuracy, "\n")
+cat("Sensitivity:", sensitivity, "\n")
+cat("Precision:", precision, "\n")
+cat("F1 Score:", f1, "\n")
+```
+Using the test set, the decision tree has an accuracy of 85.53%, sensitivity of 1.00, and AUC of 0.654. Compared to evaluations in question 5 and 6, it doesn't perform as well as boosting or random forest, but still provides reasonable performance and better understanding. 
+
+#Question 11. Pruned Decision Tree
+```{r}
+#question 11
+set.seed(35865377)
+
+WD.rpart <- rpart(Class ~ ., 
+                  data = WD.train, 
+                  method = "class", 
+                  control = rpart.control(cp = 0.0005, minsplit = 10, maxdepth = 10))
+
+printcp(WD.rpart)
+```
+
+```{r}
+#pruning
+best_cp <- 0.00636943
+WD.rpart.pruned <- prune(WD.rpart, cp = best_cp)
+
+plot(WD.rpart.pruned)
+text(WD.rpart.pruned, pretty=0)
+title("Pruned Decision Tree")
+
+```
+I implemented a pruned decision tree using CP=0.00636943 chosen based on xerror from rpart. 
+
+
+```{r}
+#Evaluation
+
+WD.rpart.pruned.class <- predict(WD.rpart.pruned, WD.test, type = "class")
+
+WD.rpart.pruned.cm <- confusionMatrix(WD.rpart.pruned.class, WD.test$Class)
+print(WD.rpart.pruned.cm)
+
+rpart.accuracy <- WD.rpart.pruned.cm$overall["Accuracy"]
+rpart.recall <- WD.rpart.pruned.cm$byClass["Sensitivity"]
+rpart.precision <- WD.rpart.pruned.cm$byClass["Precision"]
+rpart.f1 <- WD.rpart.pruned.cm$byClass["F1"]
+
+cat("Accuracy:", rpart.accuracy, "\n")
+cat("Recall:", rpart.recall, "\n")
+cat("Precision:", rpart.precision, "\n")
+cat("F1 Score:", rpart.f1, "\n")
+
+
+```
+
+To improve upon the original decision tree model in question 4, I created a tuned decision tree with parameter adjustments. I set cp=0.0005 because this value allowed the tree to grow deeper. It might increase the risk of overfitting, but value like cp=0.001 was not small enough.
+As shown in evaluation metrics part, this new tree outperformed the original decision tree model which failed to correctly identify any Oats instances. It has better scores for recall and precision compared to other models. Thus, tuning and pruning of decision trees did improve the model's classification performance. 
+
+
+#Question 12. Neural Network 
+```{r}
+#question 12
+library(neuralnet)
+library(caret)
+library(ROCR)
+
+WD.neural.train <- WD.train[, c("A26", "A02", "A30", "A05", "A18", "Class")]
+WD.neural.test <- WD.test[, c("A26", "A02", "A30", "A05", "A18", "Class")]
+nntrain = as.data.frame(WD.neural.train)
+set.seed(35865377)
+trial <- neuralnet(Class ~., nntrain, hidden = 5, threshold = 0.05)
+plot(trial)
+```
+
+```{r}
+#evaluation
+
+WD.neural.predict = predict(trial, WD.neural.test)
+labels <- c('0','1')
+
+prediction_checker <- labels[max.col(WD.neural.predict)]
+WD.neural.cm <- table(observed = WD.neural.test$Class, predicted = prediction_checker)
+
+WD.neural.cm
+```
+
+Based on the top 5 most important features identified in previous questions, I implemented an Artificial Neural Network using neruralnet package. The 5 most important predictor attributes from earlier questions were used. The training data was normalized between 0 and 1, and used one hidden layer with 5 neurons, and threshold set to 0.05. 
+
+The ANN achieved approximately 85.27% accuracy, but 0% sensitivity for the Oats class. This shows that it was heavily overfit to class 0. Compared to previous models, ANN achieved similar accuracy with others but it underperformed in distinguishing the minotiry class. It has higher recall and AUC like boosting and random forest. 
+
+#Question 13. SVM
+```{r}
+WD.svm.train <- WD.train[, c("A26", "A02", "A30", "A05", "A18", "Class")]
+WD.svm.test <- WD.test[, c("A26", "A02", "A30", "A05", "A18", "Class")]
+WD.svm.train$Class <- as.factor(WD.svm.train$Class)
+WD.svm.test$Class <- as.factor(WD.svm.test$Class)
+
+#training
+set.seed(35865377)
+WD.svm.model <- svm(Class ~ ., data = WD.svm.train, kernel = "radial", probability = TRUE)
+WD.svm.pred <- predict(WD.svm.model, newdata = WD.svm.test)
+
+WD.svm.cm <- confusionMatrix(WD.svm.pred, WD.svm.test$Class)
+print(WD.svm.cm)
+
+```
+I tried a new classifier, a Support Vector Machine (SVM) classifier, which is used for pattern recognition. I used e1071 and ROCR library. https://cran.r-project.org/web/packages/e1071/index.html) It has an accuracy of 85.53%, sensitivity of 1.00. Compared to neural network, it has a slightly better accuracy.
+
+
+
+
+
+
+
