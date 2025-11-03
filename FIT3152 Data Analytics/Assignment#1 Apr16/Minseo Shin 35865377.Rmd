@@ -1,0 +1,404 @@
+---
+title: "Minseo Shin 35865377"
+author: "SHIN MINSEO"
+date: "2025-04-17"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(cluster)
+library(tidyr)
+```
+
+```{r}
+#Data Setup
+rm(list = ls())
+set.seed(35865377)
+VCData = read.csv("WVSExtract.csv") 
+VC = VCData[sample(1:nrow(VCData),50000, replace=FALSE),] #sample 50,000 respondents
+VC = VC[,c(1:6, sort(sample(7:46,17, replace = FALSE)), 47:53, sort(sample(54:69,10, replace = FALSE)))] 
+```
+
+##Question 1a. 
+
+```{r}
+#Q1 observe data
+dim(VC)
+str(VC)
+summary(VC)
+
+#check missing values
+VC[VC<0] <- NA
+colSums(is.na(VC))
+sum(is.na(VC))
+table(VC$Country)
+```
+
+###Overall Dataset
+The dataframe consists 50,000 rows and 40 columns. This represents a sample of 50,000 respondents randomly selected from the survey dataset, and 40 variables that span a range of social, political, economic concepts. The first column (Country) is a character variable, and remaining 39 variables are integers that match with responses to survey questions. 
+
+###Missing Data
+When tested with is.na(), the dataset appears to have no missing values, but after checking the codebook provided by WVS, it was revealed that the response uses special negative values to represent missing or invalid answers. For example, input '-1' means "Don't Know", '-2' means 'No Answer', and so on. There are total 41,676 missing values. 
+
+###Distribution of Numerical attributes
+Using summary(VC), I could observe minimum, maximum, median, mean values. The summary reveals that most variables use Likert-type ordinal scales. Some variables range from 1 to 4, 1 to 10, or 0 to 10. 
+
+###Variety of Non-numerical attributes 
+The only non-numerical attribute is Country, a character variable that represents country of birth using three-letter codes. Using table(VC$Country), we can observe that 650 responses are from Kenya. 
+
+
+##Question 2a. 
+```{r}
+#create new variable to label kenya or other
+VC$group <- ifelse(VC$Country == "KEN", "Kenya", "Other")
+#create new data frame and filter columns (exclude "Country" and "group")
+predictors <- VC[, !(names(VC) %in% c("Country", "group"))]
+#compute means
+group_means <- VC |>
+  group_by(group) |>
+  summarise(across(where(is.numeric), ~mean(.x, na.rm = TRUE)))
+#compte difference
+kenya_means <- group_means[group_means$group == "Kenya", -1]
+other_means <- group_means[group_means$group == "Other", -1]
+mean_diff <- as.numeric(kenya_means - other_means)
+diff_df <- data.frame(
+  Variable = colnames(kenya_means),
+  Kenya_Mean = as.numeric(kenya_means),
+  Other_Mean = as.numeric(other_means), 
+  Mean_Difference = round(mean_diff,3)
+)
+diff_df <- diff_df[order(abs(diff_df$Mean_Difference), decreasing = TRUE),] #order
+
+#barplot difference in means
+top_diffs <- head(diff_df, 20)
+
+ggplot(top_diffs, aes(x=reorder(Variable, Mean_Difference), y=Mean_Difference))+
+  geom_bar(stat="identity", fill="blue") + 
+  coord_flip() + 
+  labs(title = "Top 20 Mean Differences: Kenya vs Others", 
+       y = "Mean Difference", 
+       x = "Variable") + 
+  theme_minimal()
+```
+###Comparing Mean Differences: Kenya vs Others
+To explore how participant responses in Kenya differ from other countries, the first approach was to compute the average scores across all variables and plot the top 20 variables with the largest gaps. This analysis helps us to identify areas where Kenya respondents' attitudes or experiences differ from global average. 
+As seen in the bar plot, one of the most striking difference is in Age. In average, Kenya participants are 12.4 years younger than those from other countries. This large demographic gap likely influences many other attitude differences observed in the data. 
+Also, it is observed that Kenya respondents have lower satisfaction with life (HSatLife) and with finances (HSatFin), scoring mean differences -0.8 and 0.9 respectively. This shows a lower well-being among Kenyan sample compared to the global sample. 
+Additionally, Kenya has lower engagement with digital communication, reflected through variables like (PEmail) and (PSocial). Similarly, there is lower average values for (VFriends), (PFriends), (EPrivate), which all indicate a relatively low importance on personal and social connections.
+
+However, there are also few areas where Kenyans scored higher average than other countries. 
+Employment status and Confidence in the police (Cpolice). A high value for confidence in Police may reflect a strong value of formal institutions. 
+However, it is important to note that mean difference for Employment is positive, so Kenya has a higher average employment value. The employment states falls into 7 scores (1 = Full-time, 7 = unemployed). It is likely that Kenya has a higher proportion of people who are unemployed, students, or not in-full time work, compared to global sample. 
+
+```{r}
+#run t-tests
+ttest_results <- sapply(names(predictors), function(var) {
+  t.test(VC[[var]] ~ VC$group)$p.value
+})
+ttest_results
+#convert result to dataframe
+ttest_df <- data.frame(
+  Variable = names(ttest_results),
+  p_value = round(ttest_results, 4)
+)
+
+ttest_df
+
+```
+###Welch's T-test Results
+T-tests were conducted to determine whether the differences in attribute scores for Kenya vs. Others were statistically significant. Since this task compare the means between two independent groups, and the dataset includes numeric values, the t-test is an appropriate approach. Welch's t-test is applied because it doesn't assume equal variance between groups and is better for unequal sample sizes. 
+
+Out of tested variables, majority showed statistically significant difference (p<0.05). Most significant differences (p<0.001) include variables like (TPeople), T(Neighborhood). There are a few that was not significantly different, such as (TFamily) which has p=0.2953. This suggest that views about family are relatively consistent across Kenya and global average. Small -values should be interpreted alongside effect size because very large samples can generate statistically significant difference that are not actually meaningful. 
+
+##Question 2b. 
+
+```{r}
+#filter kenya only
+VC_Kenya <- VC[VC$Country == "KEN", ]
+#confidence in social organizations (starting with C)
+conf_vars <- names(VC_Kenya)[grepl("^C", names(VC_Kenya))]
+#predictor variables exclude country, group conf_var
+predictors <- names (VC_Kenya)[!(names(VC_Kenya) %in% c("Country", "group", conf_vars))]
+
+results <- data.frame(Confidence_Var = character(), 
+                      R_squared = numeric(),
+                      Top_Predictors = character(), 
+                      stringsAsFactors = FALSE)
+
+```
+
+```{r}
+for (conf_var in conf_vars) {
+  
+  formula <- as.formula(paste(conf_var, "~", paste(predictors, collapse = "+")))
+  
+  model_data <- VC_Kenya[, c(conf_var, predictors)]
+  
+  # Make sure response is numeric
+  model_data[[conf_var]] <- as.numeric(model_data[[conf_var]])
+  
+  # Remove rows with any NAs
+  model_data <- na.omit(model_data)
+  
+#in case data is too small
+  if (nrow(model_data) < 30) next
+  
+  #clean data, remove NA
+  y <- model_data[[conf_var]]
+  if (any(is.na(y)) || any(is.nan(y)) || any(is.infinite(y))) next
+  
+  # Fit the model
+  model <- lm(formula, data = model_data)
+  
+  #find R^2
+  r2 <- summary(model)$r.squared
+  
+  # Get top 3 predictors 
+  coefs <- summary(model)$coefficients[-1, "Estimate"]
+  top_preds <- names(sort(abs(coefs), decreasing = TRUE))[1:3]
+  
+  results <- rbind(results, data.frame(
+    Confidence_Var = conf_var,
+    R_squared = round(r2, 3),
+    Top_Predictors = paste(top_preds, collapse = ", ")
+  ))
+}
+
+head(results)
+sorted_results <- results[order(-results$R_squared),]
+sorted_results
+```
+To assess predicting confidence in social organisms, I fit multiple linear regression models for each confidence variables (filtered by prefix "C"). The predictors include demographic variables, trust-related variables and value measures. 
+
+###How well do particiapnt responses predict confidence?
+Using R-squared value which indicates the proportion of variance in the confidence variable explained by the model, the predictive performance of this survey is tested.
+As shown in results, the highest R-squared value is 0.192 for Government. It suggests a meaningful ability to predict confidence in government using participant responses. Others like Police, Unions, and Parliament also show a reasonable score for R-squared value. In contrast, variables like Television and Press show a very low R-squared value, meaning that they were poorly predicted by participant attributes. This likely suggest that ideas of media are influenced by some other factors. 
+Overall, the R-squared values range from 0.05 to 0.19, showing some predictive power. 
+
+###Which attributes are the best predictors?
+(VFamily) appeared the most (7 out of 10 top models) among all attributes. It is the most influential and consistent predictor. (TNeighborhood) and (TMeet) also appeared commonly, showing how social connection influence confidence. 
+
+###Which confidence variables are more reliably predicted?
+In the sorted results, the top rows including (CGovernment), (CPolice), (CUnions), (CParliament) are the most reliable predicted social organizations. 
+
+##Question 2c. 
+
+```{r}
+#filter non-kenya
+VC_Other <- VC[VC$Country != "KEN", ]
+#confidence in social organizations (starting with C)
+conf_vars <- names(VC_Other)[grepl("^C", names(VC_Other))]
+#predictor variables exclude country, group conf_var
+predictors <- names (VC_Other)[!(names(VC_Other) %in% c("Country", "group", conf_vars))]
+
+results_other <- data.frame(Confidence_Var = character(), 
+                      R_squared = numeric(),
+                      Top_Predictors = character(), 
+                      stringsAsFactors = FALSE)
+
+```
+
+```{r}
+#repeat 2b
+for (conf_var in conf_vars) {
+  
+  formula <- as.formula(paste(conf_var, "~", paste(predictors, collapse = "+")))
+  
+  model_data <- VC_Other[, c(conf_var, predictors)]
+  
+  # Make sure response is numeric
+  model_data[[conf_var]] <- as.numeric(model_data[[conf_var]])
+  
+  # Remove rows with any NAs
+  model_data <- na.omit(model_data)
+  
+#in case data is too small
+  if (nrow(model_data) < 30) next
+  
+  #clean data, remove NA
+  y <- model_data[[conf_var]]
+  if (any(is.na(y)) || any(is.nan(y)) || any(is.infinite(y))) next
+  
+  # Fit the model
+  model <- lm(formula, data = model_data)
+  
+  #find R^2
+  r2 <- summary(model)$r.squared
+  
+  # Get top 3 predictors 
+  coefs <- summary(model)$coefficients[-1, "Estimate"]
+  top_preds <- names(sort(abs(coefs), decreasing = TRUE))[1:3]
+  
+  results_other <- rbind(results_other, data.frame(
+    Confidence_Var = conf_var,
+    R_squared = round(r2, 3),
+    Top_Predictors = paste(top_preds, collapse = ", ")
+  ))
+}
+
+head(results_other)
+sorted_results_other <- results_other[order(-results_other$R_squared),]
+sorted_results_other
+```
+
+```{r}
+#visualize 2c
+
+merge_results <- merge(results, results_other, by = "Confidence_Var", suffixes = c("_Kenya", "_Other"))
+
+#make into long format
+long <- merge_results |>
+  select(Confidence_Var, R_squared_Kenya, R_squared_Other) |>
+  pivot_longer(cols = starts_with("R_squared"), 
+               names_to = "Group", 
+               values_to = "R_squared")
+
+#plot
+ggplot(long, aes(x=reorder(Confidence_Var, R_squared), y = R_squared, fill = Group)) + 
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "R-Square comparison: Kenya vs Others", 
+       x = "Confidence variable", 
+       y = "R-squared") + theme_minimal()
+```
+
+When the same method is applied on all other countries, we can observe the results as shown above. The predictive power of participant responses is slightly stronger globally when compared to that of Kenya. The top model is Government, with R-squared value of 0.266, whereas it is 0.192 for Kenya. R-squared for Parliament is 0.233 globally, whereas Kenya is 0.168. 
+(TPeople) and (TNeighborhood) were most frequent predictors. Political Satisfaction (PSatisfied) is one top predictor for other countries, but was not one of top predictors in Kenya. 
+(VFamiy) and (TMeet) also appeared commonly, similar to Kenya. There is some overlap in important predictors like trust and social values, but Kenya is more influenced by family and religion. 
+
+
+##Question 3a. 
+Political Stability https://data.worldbank.org/indicator/PV.PER.RNK
+GDP per Capita https://data.worldbank.org/indicator/NY.GDP.PCAP.CD
+Life Expectancy https://data.worldbank.org/indicator/SP.DYN.LE00.IN
+
+
+```{r}
+#Extractpolitical stability 
+politics = read.csv("PoliticalStability.csv", skip = 4)
+
+pol_2023 <- politics[,c("Country.Code","X2023")]
+
+#Extract GDP per capita
+GDP = read.csv("GDPperCapita.csv", skip = 4)
+
+gdp_2023 <- GDP[,c("Country.Code","X2023")]
+
+
+#Extract Life expectancy
+Life = read.csv("LifeExpectancy.csv", skip=4)
+
+life_2023 <- Life[,c("Country.Code","X2023")]
+
+
+#Merge
+indicators <- merge(gdp_2023, life_2023, by = "Country.Code")
+indicators <- merge(indicators, pol_2023, by = "Country.Code")
+indicators <- na.omit(indicators)
+
+scaled <- scale(indicators[,-1])
+rownames(scaled) <- indicators$Country.Code
+dist_matrix <- dist(scaled)
+
+#silhouette for k=2 to 10
+avg_sil_width <- numeric(9)
+for (k in 2:10) {
+  clusters <- cutree(hclust(dist_matrix, method = "ward.D2"), k)
+  sil <- silhouette(clusters, dist_matrix)
+  avg_sil_width[k - 1] <- mean(sil[, 3])
+}
+
+plot(2:10, avg_sil_width, type = "b", pch = 19,
+     xlab = "Number of Clusters (k)",
+     ylab = "Average Silhouette Width",
+     main = "Optimal Number of Clusters using Silhouette Score")
+
+```
+3 country-level datasets are chosen from World Bank (year 2023 filtered). To identify countries most similar to Kenya, hierarchial clustering analysis based on a combination of social, economic, political indicators will be performed. GDP per capita measures economic development. Life expectancy reflects public health. Political stability represents governance quality. 
+
+The datasets are merged by country code and missing values are cleaned. 
+
+Since the silhouette score peaks at k=2, it is the best clustering solution to divide countries into 2 broad clusters. Then, Ward's hierarchical clustering is used to separate countries into different groups. 
+
+```{r}
+#hierarchical clustering
+hier <- hclust(dist_matrix, method = "ward.D2")
+clusters<-cutree(hier, k=2)
+indicators$Cluster <- clusters
+
+# find just for countries in Kenya's cluster
+kenya_cluster <- indicators$Cluster[indicators$Country.Code == "KEN"]
+similar <- indicators[indicators$Cluster == kenya_cluster, ]
+head(similar)
+```
+
+```{r}
+
+# Redo clustering only on that subset
+subset_scaled <- scaled[indicators$Cluster == kenya_cluster, ]
+subset_dist <- dist(subset_scaled)
+subset_hc <- hclust(subset_dist, method = "ward.D2")
+plot(subset_hc, labels = rownames(subset_scaled), main = "Dendrogram: Kenya's Cluster")
+
+```
+Kenya was grouped into Cluster 1, which includes countries that tend to have lower GDP per capita, moderate life expectancy, and less political stability. Aruba, Afghanistan, Angola, Albania, Angola are countries that are similar to Kenya. 
+
+##Question 3b. 
+
+```{r}
+
+cluster_countries <- similar$Country.Code
+
+VC_cluster <- VC[VC$Country %in% cluster_countries, ]
+
+conf_vars <- names(VC_cluster)[grepl("^C", names(VC_cluster))]
+predictors <- names(VC_cluster)[!(names(VC_cluster) %in% c("Country", "group", conf_vars))]
+
+#run regression
+results_cluster <- data.frame(Confidence_Var = character(),
+                              R_squared = numeric(),
+                              Top_Predictors = character(),
+                              stringsAsFactors = FALSE)
+
+for (conf_var in conf_vars) {
+  
+  formula <- as.formula(paste(conf_var, "~", paste(predictors, collapse = "+")))
+  model_data <- VC_cluster[, c(conf_var, predictors)]
+  model_data[[conf_var]] <- as.numeric(model_data[[conf_var]])
+  model_data <- na.omit(model_data)
+  
+  if (nrow(model_data) < 30) next
+  y <- model_data[[conf_var]]
+  if (any(is.na(y)) || any(is.nan(y)) || any(is.infinite(y))) next
+  
+  model <- lm(formula, data = model_data)
+  r2 <- summary(model)$r.squared
+  coefs <- summary(model)$coefficients[-1, "Estimate"]
+  top_preds <- names(sort(abs(coefs), decreasing = TRUE))[1:3]
+  
+  results_cluster <- rbind(results_cluster, data.frame(
+    Confidence_Var = conf_var,
+    R_squared = round(r2, 3),
+    Top_Predictors = paste(top_preds, collapse = ", ")
+  ))
+}
+
+results_cluster <- results_cluster[order(-results_cluster$R_squared), ]
+results_cluster
+
+
+```
+
+
+##Appendix
+
+
+
+

@@ -1,0 +1,102 @@
+---
+title: "Minseo Shin, 35865377"
+author: "SHIN MINSEO"
+date: "2025-04-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(cluster)
+```
+
+##Question 1a. 
+
+```{r}
+#question 1a. setup
+VCData = read.csv("WVSExtract.csv")
+VCData 
+
+set.seed(35865377)
+VC = VCData[sample(1:nrow(VCData),5000,replace=FALSE),]
+VC = VC[, c(1:6, sort(sample(7:46, 17, replace = FALSE)), 47:53, sort(sample(54:69, 10, replace = FALSE)))]
+```
+
+```{r}
+#Q1a. observing data
+dim(VC)
+str(VC)
+colSums(is.na(VC))
+summary(VC)
+sapply(VC, function(x) if (is.numeric(x)) sum(x<0, na.rm=TRUE) else 0)
+table(VC$Country)
+```
+
+###Overall Dataset
+The dataframe consists 5,000 rows and 40 columns. This represents a sample of 5,000 respondents randomly selected from the survey dataset, and 40 variables that span a range of social, political, economic concepts. The first column (Country) is a character variable, and remaining 39 variables are integers that match with responses to survey questions. 
+
+###Missing Data
+When tested with is.na(), the dataset appears to have no missing values, but after checking the codebook provided by WVS, it was revealed that the reponse uses special negative values to represent missing or invalid answers. For example, input '-1' means "Don't Know", '-2' means 'No Answer', and so on. 
+
+###Distribution of Numerical attributes
+Using summary(VC), I could observe minimum, maximum, median, mean values. The summary reveals that most variables use Likert-type ordinal scales. 
+
+###Variety of Non-numerical attributes 
+The only non-numerical attribute is Country, a character variable that represents country of birth using three-letter codes. Using table(VC$Country), we can observe the how many respondents are from each country. 
+
+
+
+##Question 2a. 
+I first cleaned special missing values. My focus country is Kenya, so I split the data set into two groups. 
+
+```{r}
+#clean special missing values (negative)
+VC_new <- as.data.frame(lapply(VC, function(x){
+  if (is.numeric(x)) x[x<0] <- NA
+  else x
+}))
+```
+
+```{r}
+VC_new <- VC_new |> rename(coded_country = Country) #rename country
+#split data
+kenya_sample <- VC_new |> filter(coded_country == "KEN")
+non_kenya_sample <- VC_new |> filter(coded_country != "KEN")
+
+#drop country code column so that all variables are numeric
+kenya_sample <- kenya_sample |> 
+  select(-coded_country) |>
+  mutate_if(is.numeric, as.integer)
+
+non_kenya_sample <- non_kenya_sample |> 
+  select(-coded_country) |>
+  mutate_if(is.numeric, as.integer)
+
+#Compute and compare mean vectors
+mean_kenya <- colMeans(kenya_sample, na.rm=TRUE)
+mean_non_kenya <- colMeans(non_kenya_sample, na.rm=TRUE)
+
+mean_diff <- mean_kenya - mean_non_kenya
+print(mean_diff)
+
+#Welch T-Test
+
+t_test_result <- t.test(as.matrix(kenya_sample), as.matrix(non_kenya_sample))
+
+```
+
+##Question 2b. 
+
+
+##Question 2c. 
+
+
+
+##Question 3a. 
+
+##Question 3b. 
+
